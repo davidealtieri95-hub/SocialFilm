@@ -90,3 +90,35 @@ CREATE TABLE IF NOT EXISTS hype_voti (
     titolo_film VARCHAR(200) NOT NULL,
     livello VARCHAR(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+---
+
+## 🚀 Installazione e Avvio Locale
+
+Per far girare il progetto sul tuo computer, segui questi passaggi:
+
+1. **Clona il repository:**
+   ```bash
+   git clone [https://github.com/IL_TUO_NOME_UTENTE/SocialFilm.git](https://github.com/IL_TUO_NOME_UTENTE/SocialFilm.git)
+   cd SocialFilm
+   CREA AMBIENTE VIRTUALE
+python -m venv venv
+# Attiva (Windows):
+.\venv\Scripts\activate
+# Attiva (Mac/Linux):
+source venv/bin/activate
+
+Installa le dipendenze:
+
+pip install -r requirements.txt
+
+Configura il file .env
+
+TMDB_API_KEY=LaTuaChiaveAPI
+FLASK_SECRET_KEY=LaTuaChiaveSegreta
+FLASK_DEBUG=True
+
+Avvio
+
+python app.py
+
