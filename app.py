@@ -492,7 +492,8 @@ def follow_user(id_utente_dest):
         cursor.execute("DELETE FROM segui WHERE id_seguitore = %s AND id_seguito = %s", (id_seguitore, id_utente_dest))
         stato = "unfollowed"
     else:
-        cursor.execute("INSERT INTO segui WHERE id_seguitore = %s AND id_seguito = %s", (id_seguitore, id_utente_dest))
+        # ✅ RISOLTO: Sostituito il vecchio WHERE errato con la sintassi INSERT corretta
+        cursor.execute("INSERT INTO segui (id_seguitore, id_seguito) VALUES (%s, %s)", (id_seguitore, id_utente_dest))
         stato = "followed"
     conn.commit(); cursor.close(); conn.close()
     return {"status": stato}
