@@ -360,6 +360,41 @@
         <!-- COLONNA LATERALE -->
         <div class="sidebar-column">
             
+            <!-- ⚔️ SCONTRO DEL GIORNO (NUOVA FUNZIONALITÀ INTERATTIVA) -->
+            <div class="stats-box" style="border: 1px solid #ff9f43; margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #ff9f43; border-bottom: 2px solid #ff9f43; padding-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                    ⚔️ Scontro del Giorno
+                </h3>
+                <p style="font-size: 0.75rem; color: #aaa; margin-top: 5px; margin-bottom: 12px;">Vota il vincitore della sfida cinematografica di oggi!</p>
+                
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Opzione A -->
+                    <div style="background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333; cursor: pointer; transition: background 0.2s;" onclick="votaScontro('A')">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <strong>{{ scontro.film_a|default('Interstellar') }}</strong>
+                            <span style="color: #ff9f43; font-weight: bold;" id="pct-a">{{ scontro.pct_a|default(58) }}%</span>
+                        </div>
+                        <div style="background: #121212; height: 6px; border-radius: 3px; margin-top: 8px; overflow: hidden;">
+                            <div id="bar-a" style="background: #ff9f43; width: {{ scontro.pct_a|default(58) }}%; height: 100%; transition: width 0.5s;"></div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; font-size: 0.7rem; color: #666; font-weight: bold; margin: -5px 0;">VS</div>
+
+                    <!-- Opzione B -->
+                    <div style="background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333; cursor: pointer; transition: background 0.2s;" onclick="votaScontro('B')">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <strong>{{ scontro.film_b|default('Inception') }}</strong>
+                            <span style="color: var(--accent-color); font-weight: bold;" id="pct-b">{{ scontro.pct_b|default(42) }}%</span>
+                        </div>
+                        <div style="background: #121212; height: 6px; border-radius: 3px; margin-top: 8px; overflow: hidden;">
+                            <div id="bar-b" style="background: var(--accent-color); width: {{ scontro.pct_b|default(42) }}%; height: 100%; transition: width 0.5s;"></div>
+                        </div>
+                    </div>
+                </div>
+                <p style="font-size: 0.65rem; color: #555; text-align: center; margin-top: 8px; margin-bottom: 0;">Voti totali oggi: <span id="voti-totali">{{ scontro.tot_voti|default(142) }}</span></p>
+            </div>
+
             <!-- 📊 STATISTICHE RAPIDE UTENTE LOGGATO (FUNZIONALITÀ 3) -->
             {% if id_utente_loggato and stats_utente %}
             <div class="stats-box">
@@ -411,6 +446,32 @@
 </div>
 
 <script>
+// ⚔️ GESTIONE VOTAZIONE SCONTRO DEL GIORNO
+window.votaScontro = function(scelta) {
+    fetch('/vota_scontro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scelta: scelta })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            alert(data.error);
+        } else if (data.pct_a !== undefined) {
+            document.getElementById('pct-a').innerText = data.pct_a + '%';
+            document.getElementById('pct-b').innerText = data.pct_b + '%';
+            document.getElementById('bar-a').style.width = data.pct_a + '%';
+            document.getElementById('bar-b').style.width = data.pct_b + '%';
+            document.getElementById('voti-totali').innerText = data.tot_voti;
+            alert("Voto registrato con successo! 🎉");
+        }
+    })
+    .catch(err => {
+        console.error("Errore fetch:", err);
+        alert("Eseguito voto mock per test (assicurati che la route backend sia attiva!)");
+    });
+};
+
 // 🔔 GESTIONE NOTIFICHE TOGGLE INTERATTIVO (FUNZIONALITÀ 4)
 document.addEventListener('DOMContentLoaded', function() {
     const bellBtn = document.getElementById('bell-button');

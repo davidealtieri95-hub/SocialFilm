@@ -1,5 +1,7 @@
 import os
 import random
+import datetime
+from datetime import date
 import requests
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from database import get_db_connection
@@ -16,7 +18,30 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'chiave-di-emergenza-locale-
 TMDB_API_KEY = os.environ.get('TMDB_API_KEY')
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 
-# 🏠 1. HOME FEED (Con Carosello dei Film di Tendenza & Classifica)
+# 📅 DATABASE SCONTRI DEL GIORNO (Predefiniti)
+SCONTRI_DEL_GIORNO = [
+    {"film_a": "Interstellar 🚀", "film_b": "Inception 🌀"},
+    {"film_a": "Pulp Fiction 🍔", "film_b": "Fight Club 🧼"},
+    {"film_a": "Il Cavaliere Oscuro 🦇", "film_b": "Spider-Man 2 🕷️"},
+    {"film_a": "The Matrix 🕶️", "film_b": "Avatar 🌊"},
+    {"film_a": "Il Signore degli Anelli 💍", "film_b": "Harry Potter ⚡"},
+    {"film_a": "Ritorno al Futuro 🚗", "film_b": "Star Wars V 🌌"},
+    {"film_a": "Titanic 🚢", "film_b": "La La Land 🎹"},
+    {"film_a": "Shutter Island 🏝️", "film_b": "Se7en 📦"},
+    {"film_a": "Django Unchained 🤠", "film_b": "Bastardi Senza Gloria 🪖"},
+    {"film_a": "Alien 👽", "film_b": "La Cosa ❄️"},
+    {"film_a": "Il Gladiatore ⚔️", "film_b": "Braveheart 🏴󠁧󠁢󠁳󠁣󠁴󠁿"},
+    {"film_a": "Joker 🤡", "film_b": "Taxi Driver 🚕"},
+    {"film_a": "The Truman Show 📺", "film_b": "Eternal Sunshine 🧠"}
+]
+
+def get_scontro_odierno():
+    today = date.today()
+    day_num = today.timetuple().tm_yday
+    idx = day_num % len(SCONTRI_DEL_GIORNO)
+    return SCONTRI_DEL_GIORNO[idx], today
+
+# 🏠 1. HOME FEED (Con Carosello dei Film di Tendenza, Classifica & Scontro del Giorno)
 @app.route('/')
 def home():
     search_query = request.args.get('search', '')
@@ -58,6 +83,28 @@ def home():
         leaderboard = cursor.fetchall()
     except Exception as e:
         print(f"Errore caricamento leaderboard: {e}")
+
+    # 🗳️ RECUPERO SCONTRO DEL GIORNO
+    scontro_oggi, data_oggi = get_scontro_odierno()
+    voti_a, voti_b = 0, 0
+    scelta_utente = None
+    try:
+        cursor.execute("SELECT scelta, COUNT(*) as tot FROM scontro_voti WHERE data_voto = %s GROUP BY scelta", (data_oggi,))
+        voti_rows = cursor.fetchall()
+        for row in voti_rows:
+            if row['scelta'] == 'A': voti_a = row['tot']
+            elif row['scelta'] == 'B': voti_b = row['tot']
+            
+        if utente_loggato_id:
+            cursor.execute("SELECT scelta FROM scontro_voti WHERE id_utente = %s AND data_voto = %s", (utente_loggato_id, data_oggi))
+            voto_user = cursor.fetchone()
+            if voto_user: scelta_utente = voto_user['scelta']
+    except Exception as e:
+        print(f"Errore caricamento scontro del giorno: {e}")
+        
+    tot_voti_scontro = voti_a + voti_b
+    perc_a = round((voti_a / tot_voti_scontro) * 100) if tot_voti_scontro > 0 else 50
+    perc_b = round((voti_b / tot_voti_scontro) * 100) if tot_voti_scontro > 0 else 50
 
     id_seguiti = []
     if utente_loggato_id:
@@ -134,8 +181,176 @@ def home():
         watchlist_ids=watchlist_id_film,
         utente_loggato=session.get('nickname'),
         id_utente_loggato=utente_loggato_id,
-        leaderboard=leaderboard
+        leaderboard=leaderboard,
+        scontro_oggi=scontro_oggi,
+        scelta_utente=scelta_utente,
+        perc_a=perc_a,
+        perc_b=perc_b,
+        tot_voti_scontro=tot_voti_scontro
     )
+
+
+# 🗳️ REGISTRA VOTO SCONTRO DEL GIORNO
+@app.route('/vota_scontro', methods=['POST'])
+def vota_scontro():
+    if 'id_utente' not in session:
+        return redirect(url_for('login'))
+    
+    id_utente = session['id_utente']
+    scelta = request.form.get('scelta')
+    if scelta not in ['A', 'B']:
+        return "Scelta non valida", 400
+        
+    _, data_oggi = get_scontro_odierno()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO scontro_voti (id_utente, data_voto, scelta) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE scelta = %s",
+            (id_utente, data_oggi, scelta, scelta)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Errore voto scontro: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+        
+    return redirect(url_for('home'))
+
+
+# 🏆 GIOCO CINE-CUP: TORNEO 16 FILM
+@app.route('/cinecup', methods=['GET', 'POST'])
+def cinecup():
+    if 'id_utente' not in session:
+        return redirect(url_for('login'))
+        
+    if request.method == 'GET' and 'continue' not in request.args:
+        # Inizializziamo il torneo con 16 film famosi da TMDB
+        films = []
+        try:
+            res = requests.get(f"{TMDB_BASE_URL}/movie/popular", params={'api_key': TMDB_API_KEY, 'language': 'it-IT', 'page': random.randint(1, 3)})
+            if res.status_code == 200:
+                results = res.json().get('results', [])
+                random.shuffle(results)
+                for f in results[:16]:
+                    id_copertina = f.get('poster_path')
+                    films.append({
+                        'id_tmdb': f.get('id'),
+                        'titolo': f.get('title'),
+                        'locandina': f"https://image.tmdb.org/t/p/w500{id_copertina}" if id_copertina else "https://via.placeholder.com/500x750?text=No+Cover"
+                    })
+        except Exception as e:
+            print(f"Errore caricamento cinecup TMDB: {e}")
+            
+        # Se TMDB ha problemi, usiamo un elenco di emergenza di 16 capolavori
+        if len(films) < 16:
+            emergenza = ["Inception", "Interstellar", "Pulp Fiction", "The Matrix", "Il Gladiatore", "Avatar", "Fight Club", "Joker", "Seven", "Shutter Island", "Django Unchained", "Titanic", "Memento", "Alien", "I Soliti Sospetti", "The Departed"]
+            films = [{'id_tmdb': i, 'titolo': tit, 'locandina': "https://via.placeholder.com/500x750?text=" + tit.replace(" ", "+")} for i, tit in enumerate(emergenza)]
+            
+        matches = [[films[i], films[i+1]] for i in range(0, 16, 2)]
+        session['cinecup_matches'] = matches
+        session['cinecup_current_match'] = 0
+        session['cinecup_next_round'] = []
+        session['cinecup_round_name'] = "Ottavi di Finale ⚔️"
+        
+    # Se POST, processa il voto per il scontro corrente
+    if request.method == 'POST':
+        vincitore_id = int(request.form.get('vincitore_id'))
+        matches = session.get('cinecup_matches', [])
+        current_match_idx = session.get('cinecup_current_match', 0)
+        next_round = session.get('cinecup_next_round', [])
+        
+        current_match = matches[current_match_idx]
+        vincitore_film = current_match[0] if current_match[0]['id_tmdb'] == vincitore_id else current_match[1]
+        next_round.append(vincitore_film)
+        session['cinecup_next_round'] = next_round
+        
+        current_match_idx += 1
+        session['cinecup_current_match'] = current_match_idx
+        
+        # Finito il round corrente?
+        if current_match_idx >= len(matches):
+            if len(next_round) == 1:
+                session['cinecup_winner'] = next_round[0]
+                return redirect(url_for('cinecup_winner_page'))
+                
+            # Prepara il prossimo round
+            new_matches = [[next_round[i], next_round[i+1]] for i in range(0, len(next_round), 2)]
+            session['cinecup_matches'] = new_matches
+            session['cinecup_current_match'] = 0
+            session['cinecup_next_round'] = []
+            
+            r_len = len(new_matches)
+            if r_len == 4: session['cinecup_round_name'] = "Quarti di Finale ⚔️"
+            elif r_len == 2: session['cinecup_round_name'] = "Semifinali 🔥"
+            elif r_len == 1: session['cinecup_round_name'] = "Finalissima 👑"
+            
+    matches = session.get('cinecup_matches', [])
+    current_match_idx = session.get('cinecup_current_match', 0)
+    film_a = matches[current_match_idx][0]
+    film_b = matches[current_match_idx][1]
+    
+    return render_template(
+        'cinecup.html',
+        film_a=film_a,
+        film_b=film_b,
+        match_num=current_match_idx + 1,
+        tot_matches=len(matches),
+        round_name=session.get('cinecup_round_name')
+    )
+
+
+# 🏆 VINCITORE CINE-CUP & PUBBLICAZIONE POST AUTOMATICO
+@app.route('/cinecup/vincitore', methods=['GET', 'POST'])
+def cinecup_winner_page():
+    if 'id_utente' not in session or 'cinecup_winner' not in session:
+        return redirect(url_for('home'))
+        
+    winner = session['cinecup_winner']
+    
+    if request.method == 'POST':
+        id_utente = session['id_utente']
+        didascalia = f"🏆 Ho completato il torneo Cine-Cup ed il mio film vincitore indiscusso è: {winner['titolo']}! Che capolavoro totale! Voi siete d'accordo? 🍿🎬"
+        voto_utente = 10
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT id_film FROM film WHERE titolo = %s", (winner['titolo'],))
+        film_locale = cursor.fetchone()
+        
+        if film_locale:
+            id_film = film_locale['id_film']
+        else:
+            # Recuperiamo un genere verosimile per il vincitore
+            genere_film = "Film"
+            try:
+                res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': winner['titolo'], 'language': 'it-IT'})
+                if res_cerca.status_code == 200:
+                    results = res_cerca.json().get('results', [])
+                    if results and results[0].get('genre_ids'):
+                        mappa_generi = {28: "Azione", 12: "Avventura", 16: "Animazione", 35: "Commedia", 80: "Crime", 18: "Dramma", 27: "Horror", 10749: "Romantico", 878: "Fantascienza", 53: "Thriller", 14: "Fantasy"}
+                        genere_film = mappa_generi.get(results[0]['genre_ids'][0], "Film")
+            except: pass
+            
+            cursor.execute("INSERT INTO film (titolo, immagine, genere) VALUES (%s, %s, %s)", (winner['titolo'], winner['locandina'], genere_film))
+            conn.commit()
+            id_film = cursor.lastrowid
+            
+        cursor.execute(
+            "INSERT INTO post (id_utente, id_film, didascalia, voto_utente) VALUES (%s, %s, %s, %s)", 
+            (id_utente, id_film, didascalia, voto_utente)
+        )
+        conn.commit()
+        cursor.close(); conn.close()
+        
+        # Pulisce la sessione di gioco
+        session.pop('cinecup_winner', None)
+        return redirect(url_for('home'))
+        
+    return render_template('cinecup_winner.html', winner=winner)
 
 
 # 🎲 ROULETTE DEL CINEMA (Cosa guardo stasera?)
@@ -256,7 +471,18 @@ def create_post():
         if film_locale:
             id_film = film_locale['id_film']
         else:
-            cursor.execute("INSERT INTO film (titolo, immagine) VALUES (%s, %s)", (titolo_tmdb, locandina_tmdb))
+            # 🧠 Dynamic Genre Fetcher: Recupera il genere da TMDB per la statistica dei profili
+            genere_film = "Dramma" # Default sicuro
+            try:
+                res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': titolo_tmdb, 'language': 'it-IT'})
+                if res_cerca.status_code == 200:
+                    results = res_cerca.json().get('results', [])
+                    if results and results[0].get('genre_ids'):
+                        mappa_generi = {28: "Azione", 12: "Avventura", 16: "Animazione", 35: "Commedia", 80: "Crime", 18: "Dramma", 27: "Horror", 10749: "Romantico", 878: "Fantascienza", 53: "Thriller", 14: "Fantasy"}
+                        genere_film = mappa_generi.get(results[0]['genre_ids'][0], "Film")
+            except: pass
+            
+            cursor.execute("INSERT INTO film (titolo, immagine, genere) VALUES (%s, %s, %s)", (titolo_tmdb, locandina_tmdb, genere_film))
             conn.commit()
             id_film = cursor.lastrowid
             
@@ -290,7 +516,18 @@ def toggle_watchlist():
         if f_locale:
             id_film = f_locale['id_film']
         else:
-            cursor.execute("INSERT INTO film (titolo, immagine) VALUES (%s, %s)", (titolo, locandina))
+            # dynamic genre
+            genere_film = "Dramma"
+            try:
+                res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': titolo, 'language': 'it-IT'})
+                if res_cerca.status_code == 200:
+                    results = res_cerca.json().get('results', [])
+                    if results and results[0].get('genre_ids'):
+                        mappa_generi = {28: "Azione", 12: "Avventura", 16: "Animazione", 35: "Commedia", 80: "Crime", 18: "Dramma", 27: "Horror", 10749: "Romantico", 878: "Fantascienza", 53: "Thriller", 14: "Fantasy"}
+                        genere_film = mappa_generi.get(results[0]['genre_ids'][0], "Film")
+            except: pass
+            
+            cursor.execute("INSERT INTO film (titolo, immagine, genere) VALUES (%s, %s, %s)", (titolo, locandina, genere_film))
             conn.commit()
             id_film = cursor.lastrowid
 
@@ -313,7 +550,7 @@ def toggle_watchlist():
     return {"status": stato, "id_film": id_film}
 
 
-# 👤 4. PAGINE PROFILO CON STATISTICHE & WATCHLIST
+# 👤 4. PAGINE PROFILO CON STATISTICHE, WATCHLIST & BADGE GENERI
 @app.route('/profilo')
 def mio_profilo():
     if 'id_utente' not in session:
@@ -343,6 +580,35 @@ def profilo_utente(id_utente):
         badge = "Cinefilo Avanzato 🎬"
     else:
         badge = "Spettatore Serale 🍿"
+        
+    # 🏅 GENERI PREFERITI & BADGE DI GENERE DINAMICI
+    generi_pref = []
+    badges_generi = []
+    try:
+        cursor.execute("""
+            SELECT film.genere, COUNT(*) as tot 
+            FROM post 
+            JOIN film ON post.id_film = film.id_film 
+            WHERE post.id_utente = %s AND film.genere IS NOT NULL AND film.genere != ''
+            GROUP BY film.genere
+            ORDER BY tot DESC
+        """, (id_utente,))
+        generi_count = cursor.fetchall()
+        
+        # Estraiamo i generi preferiti principali
+        generi_pref = [f"{g['genere']} ({g['tot']} post)" for g in generi_count[:3]]
+        
+        # Mappa per l'assegnazione dei super-badge di genere (minimo 3 recensioni dello stesso genere)
+        diz_generi = {g['genere']: g['tot'] for g in generi_count}
+        if diz_generi.get('Horror', 0) >= 3: badges_generi.append("Scream Queen 🔪")
+        if diz_generi.get('Fantascienza', 0) >= 3: badges_generi.append("Esploratore dello Spazio 🚀")
+        if diz_generi.get('Azione', 0) >= 3: badges_generi.append("Stuntman Professionista 💥")
+        if diz_generi.get('Commedia', 0) >= 3: badges_generi.append("Re della Risata 🤡")
+        if diz_generi.get('Dramma', 0) >= 3: badges_generi.append("Anima Sensibile 🎭")
+        if diz_generi.get('Thriller', 0) >= 3: badges_generi.append("Agente Segreto 🕵️‍♂️")
+        if diz_generi.get('Romantico', 0) >= 3: badges_generi.append("Cuore Incurabile 💖")
+    except Exception as e:
+        print(f"Errore calcolo badge generi: {e}")
         
     cursor.execute("SELECT COUNT(*) as tot FROM segui WHERE id_seguito = %s", (id_utente,))
     follower_count = cursor.fetchone()['tot']
@@ -390,7 +656,9 @@ def profilo_utente(id_utente):
         following_count=following_count,
         sta_seguendo=sta_seguendo,
         utente_loggato=session.get('nickname'),
-        id_utente_loggato=session.get('id_utente')
+        id_utente_loggato=session.get('id_utente'),
+        generi_pref=generi_pref,
+        badges_generi=badges_generi
     )
 
 # 🔄 5. SISTEMA AVATAR EMOJI CINEMATOGRAFICI
@@ -492,7 +760,6 @@ def follow_user(id_utente_dest):
         cursor.execute("DELETE FROM segui WHERE id_seguitore = %s AND id_seguito = %s", (id_seguitore, id_utente_dest))
         stato = "unfollowed"
     else:
-        # ✅ RISOLTO: Sostituito il vecchio WHERE errato con la sintassi INSERT corretta
         cursor.execute("INSERT INTO segui (id_seguitore, id_seguito) VALUES (%s, %s)", (id_seguitore, id_utente_dest))
         stato = "followed"
     conn.commit(); cursor.close(); conn.close()
@@ -549,10 +816,12 @@ def cerca_film_api():
     except: return jsonify([]), 500
 
 if __name__ == '__main__':
-    # 💥 VERIFICA/CREAZIONE TABELLA HYPE NEL TUO DB ATTUALE
+    # 💥 VERIFICA/CREAZIONE TABELLE NEL TUO DB ATTUALE (Hype, Scontro del Giorno e colonna Genere)
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Tabella Hype
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS hype_voti (
             id_voto INT AUTO_INCREMENT PRIMARY KEY,
@@ -561,12 +830,30 @@ if __name__ == '__main__':
             livello VARCHAR(20) NOT NULL
         );
         """)
+        
+        # Tabella Scontro del Giorno
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scontro_voti (
+            id_voto INT AUTO_INCREMENT PRIMARY KEY,
+            id_utente INT NOT NULL,
+            data_voto DATE NOT NULL,
+            scelta VARCHAR(10) NOT NULL,
+            UNIQUE KEY un_voto_al_giorno (id_utente, data_voto)
+        );
+        """)
+        
+        # Tentativo silenzioso di aggiornare la tabella dei Film con il campo 'genere'
+        try:
+            cursor.execute("ALTER TABLE film ADD COLUMN genere VARCHAR(100);")
+        except Exception:
+            pass # Se esiste già, andiamo avanti tranquilli
+            
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ Tabella 'hype_voti' controllata/creata con successo nel tuo database!")
+        print("✅ Database sincronizzato correttamente con tutte le nuove tabelle!")
     except Exception as e:
-        print(f"⚠️ Impossibile verificare la tabella hype_voti: {e}")
+        print(f"⚠️ Impossibile sincronizzare il database: {e}")
 
     # Gestione dinamica e sicura del Debug basata sul file .env
     is_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'

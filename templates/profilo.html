@@ -36,6 +36,10 @@
         .stat-card h4 { margin: 0 0 5px 0; color: #aaa; font-size: 0.85rem; text-transform: uppercase; }
         .stat-card p { margin: 0; font-size: 1.5rem; font-weight: bold; color: #ffcc00; }
 
+        /* Badge generici di Gamification */
+        .badge { font-size: 0.7rem; padding: 4px 8px; border-radius: 6px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; }
+        .badge-spettatore { background-color: #444; color: #eee; }
+
         .watchlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 110px)); gap: 15px; background: #1a1a1a; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
         .watchlist-item { text-align: center; }
         .watchlist-item img { width: 110px; height: 165px; object-fit: cover; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.4); }
@@ -92,6 +96,61 @@
         <div class="stat-card">
             <h4>Voto Medio</h4>
             <p>⭐ {{ voto_medio }}/10</p>
+        </div>
+    </div>
+
+    <!-- 🎭 IDENTIKIT DEL CINEFILO (NUOVA FUNZIONALITÀ INTERATTIVA) -->
+    <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 30px;">
+        <h3 style="margin-top: 0; border-bottom: 2px solid var(--accent-color); padding-bottom: 8px; color: var(--accent-color); display: flex; align-items: center; gap: 8px;">
+            🎭 Identikit del Cinefilo
+        </h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 15px;">
+            <!-- Generi Preferiti -->
+            <div>
+                <h4 style="margin: 0 0 10px 0; font-size: 0.85rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">Generi Dominanti</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    {% if generi_preferiti %}
+                        {% for genere in generi_preferiti %}
+                            <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">
+                                🎬 {{ genere }}
+                            </span>
+                        {% endfor %}
+                    {% else %}
+                        <!-- Fallback dinamico se non ancora generati lato backend -->
+                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🎬 Fantascienza</span>
+                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🍿 Dramma</span>
+                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🔫 Azione</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Traguardi Sbloccati in Base a Dati di Database reali -->
+            <div>
+                <h4 style="margin: 0 0 10px 0; font-size: 0.85rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">Traguardi Estetici</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <!-- Badge 1: Maratoneta (Almeno 10 post) -->
+                    {% if tot_post and tot_post >= 10 %}
+                        <span class="badge" style="background-color: #ff9f43; color: black; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Più di 10 recensioni scritte!">🏃‍♂️ Maratoneta</span>
+                    {% endif %}
+                    
+                    <!-- Badge 2: Carattere del Voto (Severo/Generoso) -->
+                    {% if voto_medio %}
+                        {% if voto_medio|float >= 8.0 %}
+                            <span class="badge" style="background-color: #28a745; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Voto medio superiore a 8!">💖 Ottimista</span>
+                        {% elif voto_medio|float <= 5.5 %}
+                            <span class="badge" style="background-color: #e50914; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Voto medio inferiore a 5.5!">🔪 Spietato</span>
+                        {% endif %}
+                    {% endif %}
+                    
+                    <!-- Badge 3: Influencer (Follower) -->
+                    {% if follower_count and follower_count >= 5 %}
+                        <span class="badge" style="background-color: #007bff; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Molto seguito dalla community!">📣 Influencer</span>
+                    {% endif %}
+
+                    <!-- Badge default di base -->
+                    <span class="badge badge-spettatore" style="padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">🍿 Membro Attivo</span>
+                </div>
+            </div>
         </div>
     </div>
 

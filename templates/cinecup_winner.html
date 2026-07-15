@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="container py-5 text-center" style="max-width: 600px;">
+    <h1 class="display-3 text-warning mb-4">🎉 ABBIAMO UN RE!</h1>
+    <p class="lead text-white">Dopo duri scontri ad eliminazione diretta, il tuo film campione è:</p>
+    
+    <div class="card bg-dark text-white border-warning mx-auto my-5 p-4" style="max-width: 350px;">
+        <img src="{{ winner.locandina }}" class="card-img-top rounded img-fluid" alt="{{ winner.titolo }}">
+        <div class="card-body">
+            <h3 class="card-title text-warning mt-3">{{ winner.titolo }}</h3>
+        </div>
+    </div>
+
+    <form action="/cinecup/vincitore" method="POST">
+        <button type="submit" class="btn btn-success btn-lg px-5">Pubblica la Vittoria in Home! 🚀</button>
+    </form>
+    <a href="/" class="btn btn-outline-secondary mt-3">Torna in Home senza pubblicare</a>
+</div>
+{% endblock %}
