@@ -41,7 +41,7 @@ def get_scontro_odierno():
     idx = day_num % len(SCONTRI_DEL_GIORNO)
     return SCONTRI_DEL_GIORNO[idx], today
 
-# 🏠 1. HOME FEED (Con Carosello dei Film di Tendenza, Classifica & Scontro del Giorno)
+# 🏠 1. HOME FEED (Con Carosello dei Film di Tendenza, Classifica, Scontro del Giorno, Notifiche e Profilo)
 @app.route('/')
 def home():
     search_query = request.args.get('search', '')
@@ -100,20 +100,73 @@ def home():
             voto_user = cursor.fetchone()
             if voto_user: scelta_utente = voto_user['scelta']
     except Exception as e:
-        print(f"Errore caricamento scontro del giorno: {e}")
+        print(f"Errore scontro del giorno: {e}")
         
     tot_voti_scontro = voti_a + voti_b
     perc_a = round((voti_a / tot_voti_scontro) * 100) if tot_voti_scontro > 0 else 50
     perc_b = round((voti_b / tot_voti_scontro) * 100) if tot_voti_scontro > 0 else 50
+
+    # Pacchetto Dati Scontro allineato a index.html
+    scontro_pack = {
+        "film_a": scontro_oggi["film_a"],
+        "film_b": scontro_oggi["film_b"],
+        "pct_a": perc_a,
+        "pct_b": perc_b,
+        "tot_voti": tot_voti_scontro
+    }
+
+    # 🔔 CENTRO NOTIFICHE (Feature 4)
+    lista_notifiche = []
+    notifiche_non_lette_count = 0
+    if utente_loggato_id:
+        try:
+            cursor.execute("SELECT id_notifica, testo, letta, data_ora FROM notifiche WHERE id_utente = %s ORDER BY data_ora DESC LIMIT 10", (utente_loggato_id,))
+            lista_notifiche = cursor.fetchall()
+            cursor.execute("SELECT COUNT(*) as tot FROM notifiche WHERE id_utente = %s AND letta = 0", (utente_loggato_id,))
+            notifiche_non_lette_count = cursor.fetchone()['tot']
+        except Exception as e:
+            print(f"Errore caricamento notifiche: {e}")
+
+    # 📊 STATISTICHE RAPIDE UTENTE LOGGATO (Feature 3)
+    stats_utente = None
+    if utente_loggato_id:
+        try:
+            cursor.execute("SELECT COUNT(*) as film_visti, AVG(voto_utente) as media FROM post WHERE id_utente = %s", (utente_loggato_id,))
+            row_stats = cursor.fetchone()
+            film_visti = row_stats['film_visti'] or 0
+            media_voti = round(row_stats['media'], 1) if row_stats['media'] else '0.0'
+            
+            cursor.execute("""
+                SELECT film.genere, COUNT(*) as tot 
+                FROM post 
+                JOIN film ON post.id_film = film.id_film 
+                WHERE post.id_utente = %s AND film.genere IS NOT NULL AND film.genere != ''
+                GROUP BY film.genere
+                ORDER BY tot DESC
+                LIMIT 1
+            """, (utente_loggato_id,))
+            row_genere = cursor.fetchone()
+            genere_preferito = row_genere['genere'] if row_genere else 'Nessuno'
+            
+            stats_utente = {
+                "film_visti": film_visti,
+                "media_voti": media_voti,
+                "genere_preferito": genere_preferito
+            }
+        except Exception as e:
+            print(f"Errore calcolo statistiche utente: {e}")
 
     id_seguiti = []
     if utente_loggato_id:
         cursor.execute("SELECT id_seguito FROM segui WHERE id_seguitore = %s", (utente_loggato_id,))
         id_seguiti = [row['id_seguito'] for row in cursor.fetchall()]
 
+    # Query estesa per includere i voti parametrici e il conteggio post per i badge (Feature 2 & 5)
     query_base = """
     SELECT post.id_post, post.id_utente, post.id_film, utenti.nickname, utenti.avatar, 
-           film.titolo, film.immagine AS locandina, post.didascalia, post.voto_utente, post.contatore_like
+           film.titolo, film.immagine AS locandina, post.didascalia, post.voto_utente, post.contatore_like,
+           post.voto_regia, post.voto_trama, post.voto_cast,
+           (SELECT COUNT(*) FROM post p2 WHERE p2.id_utente = post.id_utente) AS user_post_count
     FROM post
     JOIN utenti ON post.id_utente = utenti.id_utente
     JOIN film ON post.id_film = film.id_film
@@ -167,7 +220,6 @@ def home():
         cursor.execute("SELECT id_film FROM watchlist WHERE id_utente = %s", (utente_loggato_id,))
         watchlist_id_film = [r['id_film'] for r in cursor.fetchall()]
         
-        # Recupera gli ID dei post a cui l'utente loggato ha già messo Like
         cursor.execute("SELECT id_post FROM likes WHERE id_utente = %s", (utente_loggato_id,))
         post_piaciuti = [r['id_post'] for r in cursor.fetchall()]
     
@@ -188,41 +240,76 @@ def home():
         utente_loggato=session.get('nickname'),
         id_utente_loggato=utente_loggato_id,
         leaderboard=leaderboard,
-        scontro=scontro_oggi,          # 👈 RISOLTO: Rinominato da 'scontro_oggi' a 'scontro' per combaciare con index.html
+        scontro=scontro_pack,
         scelta_utente=scelta_utente,
-        perc_a=perc_a,
-        perc_b=perc_b,
-        tot_voti_scontro=tot_voti_scontro
+        lista_notifiche=lista_notifiche,
+        notifiche_non_lette_count=notifiche_non_lette_count,
+        stats_utente=stats_utente
     )
 
 
-# 🗳️ REGISTRA VOTO SCONTRO DEL GIORNO
+# 🗳️ REGISTRA VOTO SCONTRO DEL GIORNO (Ritorna JSON per integrazione asincrona)
 @app.route('/vota_scontro', methods=['POST'])
 def vota_scontro():
     if 'id_utente' not in session:
-        return redirect(url_for('login'))
+        return jsonify({"error": "Devi effettuare il login per votare!"}), 401
     
     id_utente = session['id_utente']
     scelta = request.form.get('scelta')
     if scelta not in ['A', 'B']:
-        return "Scelta non valida", 400
+        return jsonify({"error": "Scelta non valida"}), 400
         
     _, data_oggi = get_scontro_odierno()
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
             "INSERT INTO scontro_voti (id_utente, data_voto, scelta) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE scelta = %s",
             (id_utente, data_oggi, scelta, scelta)
         )
         conn.commit()
+        
+        # Calcolo percentuali in tempo reale per restituirle via AJAX
+        cursor.execute("SELECT scelta, COUNT(*) as tot FROM scontro_voti WHERE data_voto = %s GROUP BY scelta", (data_oggi,))
+        voti_rows = cursor.fetchall()
+        voti_a, voti_b = 0, 0
+        for row in voti_rows:
+            if row['scelta'] == 'A': voti_a = row['tot']
+            elif row['scelta'] == 'B': voti_b = row['tot']
+            
+        tot_voti = voti_a + voti_b
+        pct_a = round((voti_a / tot_voti) * 100) if tot_voti > 0 else 50
+        pct_b = round((voti_b / tot_voti) * 100) if tot_voti > 0 else 50
+        
+        return jsonify({
+            "pct_a": pct_a,
+            "pct_b": pct_b,
+            "tot_voti": tot_voti
+        })
     except Exception as e:
         print(f"Errore voto scontro: {e}")
+        return jsonify({"error": "Errore interno al server"}), 500
     finally:
         cursor.close()
         conn.close()
-        
+
+
+# 🔔 DISATTIVA NOTIFICHE NON LETTE
+@app.route('/segna_lette')
+def segna_lette():
+    if 'id_utente' in session:
+        id_utente = session['id_utente']
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE notifiche SET letta = 1 WHERE id_utente = %s", (id_utente,))
+            conn.commit()
+        except Exception as e:
+            print(f"Errore lettura notifiche: {e}")
+        finally:
+            cursor.close()
+            conn.close()
     return redirect(url_for('home'))
 
 
@@ -233,7 +320,6 @@ def cinecup():
         return redirect(url_for('login'))
         
     if request.method == 'GET' and 'continue' not in request.args:
-        # Inizializziamo il torneo con 16 film famosi da TMDB
         films = []
         try:
             res = requests.get(f"{TMDB_BASE_URL}/movie/popular", params={'api_key': TMDB_API_KEY, 'language': 'it-IT', 'page': random.randint(1, 3)})
@@ -248,9 +334,8 @@ def cinecup():
                         'locandina': f"https://image.tmdb.org/t/p/w500{id_copertina}" if id_copertina else "https://via.placeholder.com/500x750?text=No+Cover"
                     })
         except Exception as e:
-            print(f"Errore caricamento cinecup TMDB: {e}")
+            print(f"Errore cinecup TMDB: {e}")
             
-        # Se TMDB ha problemi, usiamo un elenco di emergenza di 16 capolavori
         if len(films) < 16:
             emergenza = ["Inception", "Interstellar", "Pulp Fiction", "The Matrix", "Il Gladiatore", "Avatar", "Fight Club", "Joker", "Seven", "Shutter Island", "Django Unchained", "Titanic", "Memento", "Alien", "I Soliti Sospetti", "The Departed"]
             films = [{'id_tmdb': i, 'titolo': tit, 'locandina': "https://via.placeholder.com/500x750?text=" + tit.replace(" ", "+")} for i, tit in enumerate(emergenza)]
@@ -261,7 +346,6 @@ def cinecup():
         session['cinecup_next_round'] = []
         session['cinecup_round_name'] = "Ottavi di Finale ⚔️"
         
-    # Se POST, processa il voto per il scontro corrente
     if request.method == 'POST':
         vincitore_id = int(request.form.get('vincitore_id'))
         matches = session.get('cinecup_matches', [])
@@ -276,13 +360,11 @@ def cinecup():
         current_match_idx += 1
         session['cinecup_current_match'] = current_match_idx
         
-        # Finito il round corrente?
         if current_match_idx >= len(matches):
             if len(next_round) == 1:
                 session['cinecup_winner'] = next_round[0]
                 return redirect(url_for('cinecup_winner_page'))
                 
-            # Prepara il prossimo round
             new_matches = [[next_round[i], next_round[i+1]] for i in range(0, len(next_round), 2)]
             session['cinecup_matches'] = new_matches
             session['cinecup_current_match'] = 0
@@ -330,7 +412,6 @@ def cinecup_winner_page():
         if film_locale:
             id_film = film_locale['id_film']
         else:
-            # Recuperiamo un genere verosimile per il vincitore
             genere_film = "Film"
             try:
                 res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': winner['titolo'], 'language': 'it-IT'})
@@ -346,13 +427,12 @@ def cinecup_winner_page():
             id_film = cursor.lastrowid
             
         cursor.execute(
-            "INSERT INTO post (id_utente, id_film, didascalia, voto_utente) VALUES (%s, %s, %s, %s)", 
-            (id_utente, id_film, didascalia, voto_utente)
+            "INSERT INTO post (id_utente, id_film, didascalia, voto_utente, voto_regia, voto_trama, voto_cast) VALUES (%s, %s, %s, %s, %s, %s, %s)", 
+            (id_utente, id_film, didascalia, voto_utente, 10, 10, 10)
         )
         conn.commit()
         cursor.close(); conn.close()
         
-        # Pulisce la sessione di gioco
         session.pop('cinecup_winner', None)
         return redirect(url_for('home'))
         
@@ -450,7 +530,7 @@ def vote_hype(movie_id):
     return redirect(url_for('hype_board'))
 
 
-# ✍️ 2. CREA POST
+# ✍️ 2. CREA POST (Con Valutazione Parametrica - Feature 5)
 @app.route('/create_post', methods=['POST'])
 def create_post():
     if 'id_utente' not in session:
@@ -459,6 +539,11 @@ def create_post():
     id_utente = session['id_utente']
     didascalia = request.form['didascalia']
     voto_utente = request.form['voto_utente']
+    
+    # Acquisizione parametri dettagliati
+    voto_regia = request.form.get('voto_regia', 7)
+    voto_trama = request.form.get('voto_trama', 7)
+    voto_cast = request.form.get('voto_cast', 7)
     
     id_film = request.form.get('id_film')
     titolo_tmdb = request.form.get('titolo_film_tmdb')
@@ -477,15 +562,14 @@ def create_post():
         if film_locale:
             id_film = film_locale['id_film']
         else:
-            # 🧠 Dynamic Genre Fetcher: Recupera il genere da TMDB per la statistica dei profili
-            genere_film = "Dramma" # Default sicuro
+            genere_film = "Dramma"
             try:
                 res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': titolo_tmdb, 'language': 'it-IT'})
                 if res_cerca.status_code == 200:
                     results = res_cerca.json().get('results', [])
-                    if Math_gen := results[0].get('genre_ids'):
+                    if results and results[0].get('genre_ids'):
                         mappa_generi = {28: "Azione", 12: "Avventura", 16: "Animazione", 35: "Commedia", 80: "Crime", 18: "Dramma", 27: "Horror", 10749: "Romantico", 878: "Fantascienza", 53: "Thriller", 14: "Fantasy"}
-                        genere_film = mappa_generi.get(Math_gen[0], "Film")
+                        genere_film = mappa_generi.get(results[0]['genre_ids'][0], "Film")
             except: pass
             
             cursor.execute("INSERT INTO film (titolo, immagine, genere) VALUES (%s, %s, %s)", (titolo_tmdb, locandina_tmdb, genere_film))
@@ -493,8 +577,8 @@ def create_post():
             id_film = cursor.lastrowid
             
     cursor.execute(
-        "INSERT INTO post (id_utente, id_film, didascalia, voto_utente) VALUES (%s, %s, %s, %s)", 
-        (id_utente, id_film, didascalia, voto_utente)
+        "INSERT INTO post (id_utente, id_film, didascalia, voto_utente, voto_regia, voto_trama, voto_cast) VALUES (%s, %s, %s, %s, %s, %s, %s)", 
+        (id_utente, id_film, didascalia, voto_utente, voto_regia, voto_trama, voto_cast)
     )
     conn.commit()
     cursor.close()
@@ -522,7 +606,6 @@ def toggle_watchlist():
         if f_locale:
             id_film = f_locale['id_film']
         else:
-            # dynamic genre
             genere_film = "Dramma"
             try:
                 res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': titolo, 'language': 'it-IT'})
@@ -601,10 +684,8 @@ def profilo_utente(id_utente):
         """, (id_utente,))
         generi_count = cursor.fetchall()
         
-        # Estraiamo i generi preferiti principali
         generi_pref = [f"{g['genere']} ({g['tot']} post)" for g in generi_count[:3]]
         
-        # Mappa per l'assegnazione dei super-badge di genere (minimo 3 recensioni dello stesso genere)
         diz_generi = {g['genere']: g['tot'] for g in generi_count}
         if diz_generi.get('Horror', 0) >= 3: badges_generi.append("Scream Queen 🔪")
         if diz_generi.get('Fantascienza', 0) >= 3: badges_generi.append("Esploratore dello Spazio 🚀")
@@ -687,7 +768,7 @@ def scegli_avatar():
             cursor.close()
             conn.close()
         except Exception as e:
-            print(f"❌ Errore database cambio avatar: {e}")
+            print(f"❌ Errore cambio avatar: {e}")
             return f"Errore: {e}", 500
             
     return redirect(url_for('mio_profilo'))
@@ -721,25 +802,40 @@ def delete_post(id_post):
     cursor.close(); conn.close()
     return redirect(url_for('home'))
 
+
+# ❤️ LIKE POST (Con Generazione Notifica in tempo reale - Feature 4)
 @app.route('/like/<int:id_post>', methods=['POST'])
 def like_post(id_post):
     if 'id_utente' not in session: return {"error": "Devi login"}, 401
     id_utente = session['id_utente']
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
+    
     cursor.execute("SELECT * FROM likes WHERE id_utente = %s AND id_post = %s", (id_utente, id_post))
-    if cursor.fetchone():
+    like_esistente = cursor.fetchone()
+    
+    if like_esistente:
         cursor.execute("DELETE FROM likes WHERE id_utente = %s AND id_post = %s", (id_utente, id_post))
         cursor.execute("UPDATE post SET contatore_like = contatore_like - 1 WHERE id_post = %s", (id_post,))
     else:
         cursor.execute("INSERT INTO likes (id_utente, id_post) VALUES (%s, %s)", (id_utente, id_post))
         cursor.execute("UPDATE post SET contatore_like = contatore_like + 1 WHERE id_post = %s", (id_post,))
+        
+        # Invio notifica all'autore del post se diverso da chi mette like
+        cursor.execute("SELECT id_utente, titolo FROM post JOIN film ON post.id_film = film.id_film WHERE id_post = %s", (id_post,))
+        post_info = cursor.fetchone()
+        if post_info and post_info['id_utente'] != id_utente:
+            testo_notifica = f"A {session['nickname']} piace il tuo post su \"{post_info['titolo']}\"! ❤️"
+            cursor.execute("INSERT INTO notifiche (id_utente, testo) VALUES (%s, %s)", (post_info['id_utente'], testo_notifica))
+            
     conn.commit()
     cursor.execute("SELECT contatore_like FROM post WHERE id_post = %s", (id_post,))
     nuovo_conteggio = cursor.fetchone()['contatore_like']
     cursor.close(); conn.close()
     return {"likes": nuovo_conteggio}
 
+
+# 💬 COMMENTA POST (Con Generazione Notifica in tempo reale - Feature 4)
 @app.route('/create_comment/<int:id_post>', methods=['POST'])
 def create_comment(id_post):
     if 'id_utente' not in session: return {"error": "Devi loggarti"}, 401
@@ -747,13 +843,24 @@ def create_comment(id_post):
     testo_commento = request.form.get('testo')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
+    
     cursor.execute("INSERT INTO commenti (id_post, id_utente, testo) VALUES (%s, %s, %s)", (id_post, id_utente, testo_commento))
+    
+    # Invio notifica all'autore del post se diverso da chi commenta
+    cursor.execute("SELECT id_utente, titolo FROM post JOIN film ON post.id_film = film.id_film WHERE id_post = %s", (id_post,))
+    post_info = cursor.fetchone()
+    if post_info and post_info['id_utente'] != id_utente:
+        testo_notifica = f"{session['nickname']} ha commentato il tuo post su \"{post_info['titolo']}\": \"{testo_commento[:30]}...\" 💬"
+        cursor.execute("INSERT INTO notifiche (id_utente, testo) VALUES (%s, %s)", (post_info['id_utente'], testo_notifica))
+        
     conn.commit()
     cursor.execute("SELECT nickname FROM utenti WHERE id_utente = %s", (id_utente,))
     utente = cursor.fetchone()
     cursor.close(); conn.close()
     return jsonify({"testo": testo_commento, "nickname": utente['nickname']})
 
+
+# 👤 SEGUI UTENTE (Con Generazione Notifica in tempo reale - Feature 4)
 @app.route('/follow/<int:id_utente_dest>', methods=['POST'])
 def follow_user(id_utente_dest):
     if 'id_utente' not in session: return {"error": "Devi login"}, 401
@@ -768,6 +875,11 @@ def follow_user(id_utente_dest):
     else:
         cursor.execute("INSERT INTO segui (id_seguitore, id_seguito) VALUES (%s, %s)", (id_seguitore, id_utente_dest))
         stato = "followed"
+        
+        # Invio notifica all'utente seguito
+        testo_notifica = f"{session['nickname']} ha iniziato a seguirti! 👤"
+        cursor.execute("INSERT INTO notifiche (id_utente, testo) VALUES (%s, %s)", (id_utente_dest, testo_notifica))
+        
     conn.commit(); cursor.close(); conn.close()
     return {"status": stato}
 
@@ -821,8 +933,9 @@ def cerca_film_api():
         return jsonify(film_formattati)
     except: return jsonify([]), 500
 
+
 if __name__ == '__main__':
-    # 💥 VERIFICA/CREAZIONE TABELLE NEL TUO DB ATTUALE (Hype, Scontro del Giorno e colonna Genere)
+    # 💥 SINCRONIZZAZIONE STRUTTURA DEL DATABASE
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -848,19 +961,39 @@ if __name__ == '__main__':
         );
         """)
         
-        # Tentativo silenzioso di aggiornare la tabella dei Film con il campo 'genere'
+        # Tabella Notifiche (Feature 4)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notifiche (
+            id_notifica INT AUTO_INCREMENT PRIMARY KEY,
+            id_utente INT NOT NULL,
+            testo VARCHAR(500) NOT NULL,
+            letta TINYINT(1) DEFAULT 0,
+            data_ora DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        
+        # Colonne Valutazione Parametrica nel post (Feature 5)
+        try:
+            cursor.execute("ALTER TABLE post ADD COLUMN voto_regia INT DEFAULT 7;")
+        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE post ADD COLUMN voto_trama INT DEFAULT 7;")
+        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE post ADD COLUMN voto_cast INT DEFAULT 7;")
+        except Exception: pass
+        
+        # Colonna Genere della Tabella Film
         try:
             cursor.execute("ALTER TABLE film ADD COLUMN genere VARCHAR(100);")
-        except Exception:
-            pass # Se esiste già, andiamo avanti tranquilli
+        except Exception: pass
             
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ Database sincronizzato correttamente con tutte le nuove tabelle!")
+        print("✅ Database sincronizzato correttamente!")
     except Exception as e:
         print(f"⚠️ Impossibile sincronizzare il database: {e}")
 
-    # Gestione dinamica e sicura del Debug basata sul file .env
     is_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(debug=is_debug)
