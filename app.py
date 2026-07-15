@@ -162,9 +162,14 @@ def home():
         commenti_per_post[id_p].append(commento)
         
     watchlist_id_film = []
+    post_piaciuti = [] 
     if utente_loggato_id:
         cursor.execute("SELECT id_film FROM watchlist WHERE id_utente = %s", (utente_loggato_id,))
         watchlist_id_film = [r['id_film'] for r in cursor.fetchall()]
+        
+        # Recupera gli ID dei post a cui l'utente loggato ha già messo Like
+        cursor.execute("SELECT id_post FROM likes WHERE id_utente = %s", (utente_loggato_id,))
+        post_piaciuti = [r['id_post'] for r in cursor.fetchall()]
     
     cursor.close()
     conn.close()
@@ -179,10 +184,11 @@ def home():
         id_seguiti=id_seguiti,
         trending_movies=trending_movies,
         watchlist_ids=watchlist_id_film,
+        post_piaciuti=post_piaciuti, 
         utente_loggato=session.get('nickname'),
         id_utente_loggato=utente_loggato_id,
         leaderboard=leaderboard,
-        scontro_oggi=scontro_oggi,
+        scontro=scontro_oggi,          # 👈 RISOLTO: Rinominato da 'scontro_oggi' a 'scontro' per combaciare con index.html
         scelta_utente=scelta_utente,
         perc_a=perc_a,
         perc_b=perc_b,
@@ -477,9 +483,9 @@ def create_post():
                 res_cerca = requests.get(f"{TMDB_BASE_URL}/search/movie", params={'api_key': TMDB_API_KEY, 'query': titolo_tmdb, 'language': 'it-IT'})
                 if res_cerca.status_code == 200:
                     results = res_cerca.json().get('results', [])
-                    if results and results[0].get('genre_ids'):
+                    if Math_gen := results[0].get('genre_ids'):
                         mappa_generi = {28: "Azione", 12: "Avventura", 16: "Animazione", 35: "Commedia", 80: "Crime", 18: "Dramma", 27: "Horror", 10749: "Romantico", 878: "Fantascienza", 53: "Thriller", 14: "Fantasy"}
-                        genere_film = mappa_generi.get(results[0]['genre_ids'][0], "Film")
+                        genere_film = mappa_generi.get(Math_gen[0], "Film")
             except: pass
             
             cursor.execute("INSERT INTO film (titolo, immagine, genere) VALUES (%s, %s, %s)", (titolo_tmdb, locandina_tmdb, genere_film))
