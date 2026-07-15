@@ -697,6 +697,25 @@ def profilo_utente(id_utente):
     except Exception as e:
         print(f"Errore calcolo badge generi: {e}")
         
+    # --- NUOVA FEATURE: VETRINA ---
+    cursor.execute("""
+        SELECT film.titolo, film.immagine 
+        FROM vetrina 
+        JOIN film ON vetrina.id_film = film.id_film 
+        WHERE vetrina.id_utente = %s ORDER BY posizione ASC
+    """, (id_utente,))
+    vetrina = cursor.fetchall()
+
+    # --- NUOVA FEATURE: RADAR DEL GUSTO ---
+    cursor.execute("""
+        SELECT film.genere, AVG(post.voto_utente) as media
+        FROM post 
+        JOIN film ON post.id_film = film.id_film 
+        WHERE post.id_utente = %s AND film.genere IS NOT NULL
+        GROUP BY film.genere LIMIT 5
+    """, (id_utente,))
+    radar_data = cursor.fetchall()
+        
     cursor.execute("SELECT COUNT(*) as tot FROM segui WHERE id_seguito = %s", (id_utente,))
     follower_count = cursor.fetchone()['tot']
     
@@ -745,7 +764,9 @@ def profilo_utente(id_utente):
         utente_loggato=session.get('nickname'),
         id_utente_loggato=session.get('id_utente'),
         generi_pref=generi_pref,
-        badges_generi=badges_generi
+        badges_generi=badges_generi,
+        vetrina=vetrina,
+        radar_data=radar_data
     )
 
 # 🔄 5. SISTEMA AVATAR EMOJI CINEMATOGRAFICI

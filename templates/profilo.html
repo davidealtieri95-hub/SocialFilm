@@ -64,7 +64,6 @@
                 <h1 style="margin: 0;">{{ utente.nickname }}</h1>
                 <p style="margin: 5px 0 0 0; color: #aaa;">👥 Followers: <strong id="follower-count">{{ follower_count }}</strong> | Seguiti: <strong>{{ following_count }}</strong></p>
                 
-                <!-- 👤 TASTO SEGUI/UNFOLLOW (Mostrato solo se loggati e su profilo altrui) -->
                 {% if id_utente_loggato and id_utente_loggato != utente.id_utente %}
                     <div style="margin-top: 10px;">
                         <button id="btn-follow" 
@@ -83,7 +82,6 @@
         </div>
         
         {% if id_utente_loggato and utente.id_utente == id_utente_loggato %}
-            <!-- 🔥 NUOVO SELETTORE AVATAR EMOJI CINEMA -->
             <form action="/scegli_avatar" method="POST" style="background: #222; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
                 <select name="personaggio" style="padding: 6px; background: #333; color: white; border: none; border-radius: 4px; font-size: 0.9rem; cursor: pointer;">
                     <option value="🍿">🍿 Cinefilo Standard</option>
@@ -115,55 +113,89 @@
         </div>
     </div>
 
-    <!-- 🎭 IDENTIKIT DEL CINEFILO (NUOVA FUNZIONALITÀ INTERATTIVA) -->
+    <div class="section">
+        <h3>👑 Vetrina (Top 4)</h3>
+        <div class="showcase-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+            {% for item in vetrina %}
+                <div class="showcase-item" style="height: 150px; background: #333; border-radius: 8px; overflow: hidden;">
+                    <img src="{{ item.immagine }}" alt="{{ item.titolo }}" style="width: 100%; height: 100%; object-fit: cover;">
+                </div>
+            {% else %}
+                <p>Nessun film in vetrina.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- RADAR DEL GUSTO CON CONTROLLO -->
+    {% if radar_data %}
+        <div class="section">
+            <h3>📊 Radar del Gusto</h3>
+            <canvas id="radarChart" height="100"></canvas>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const ctx = document.getElementById('radarChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: [{% for item in radar_data %}'{{ item.genere }}',{% endfor %}],
+                    datasets: [{
+                        label: 'Voto Medio',
+                        data: [{% for item in radar_data %}{{ item.media }},{% endfor %}],
+                        backgroundColor: 'rgba(229, 9, 20, 0.2)',
+                        borderColor: 'rgba(229, 9, 20, 1)',
+                    }]
+                },
+                options: { scales: { r: { beginAtZero: true, max: 10 } } }
+            });
+        </script>
+    {% else %}
+        <div class="section">
+            <h3>📊 Radar del Gusto</h3>
+            <p style="color: #aaa;">Recensisci qualche film per vedere il tuo radar del gusto!</p>
+        </div>
+    {% endif %}
+
     <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 30px;">
         <h3 style="margin-top: 0; border-bottom: 2px solid var(--accent-color); padding-bottom: 8px; color: var(--accent-color); display: flex; align-items: center; gap: 8px;">
             🎭 Identikit del Cinefilo
         </h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 15px;">
-            <!-- Generi Preferiti -->
             <div>
                 <h4 style="margin: 0 0 10px 0; font-size: 0.85rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">Generi Dominanti</h4>
                 <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                    {% if generi_preferiti %}
-                        {% for genere in generi_preferiti %}
+                    <!-- CORRETTO: generi_pref invece di generi_preferiti -->
+                    {% if generi_pref %}
+                        {% for genere in generi_pref %}
                             <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">
                                 🎬 {{ genere }}
                             </span>
                         {% endfor %}
                     {% else %}
-                        <!-- Fallback dinamico se non ancora generati lato backend -->
-                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🎬 Fantascienza</span>
-                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🍿 Dramma</span>
-                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🔫 Azione</span>
+                        <span style="background: #252525; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #333; color: #ffcc00; font-weight: bold;">🎬 Ancora pochi dati</span>
                     {% endif %}
                 </div>
             </div>
 
-            <!-- Traguardi Sbloccati in Base a Dati di Database reali -->
             <div>
                 <h4 style="margin: 0 0 10px 0; font-size: 0.85rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px;">Traguardi Estetici</h4>
                 <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                    <!-- Badge 1: Maratoneta (Almeno 10 post) -->
                     {% if tot_post and tot_post >= 10 %}
-                        <span class="badge" style="background-color: #ff9f43; color: black; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Più di 10 recensioni scritte!">🏃‍♂️ Maratoneta</span>
+                        <span class="badge" style="background-color: #ff9f43; color: black; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">🏃‍♂️ Maratoneta</span>
                     {% endif %}
                     
-                    <!-- Badge 2: Carattere del Voto (Severo/Generoso) -->
                     {% if voto_medio %}
                         {% if voto_medio|float >= 8.0 %}
-                            <span class="badge" style="background-color: #28a745; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Voto medio superiore a 8!">💖 Ottimista</span>
+                            <span class="badge" style="background-color: #28a745; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">💖 Ottimista</span>
                         {% elif voto_medio|float <= 5.5 %}
-                            <span class="badge" style="background-color: #e50914; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Voto medio inferiore a 5.5!">🔪 Spietato</span>
+                            <span class="badge" style="background-color: #e50914; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">🔪 Spietato</span>
                         {% endif %}
                     {% endif %}
                     
-                    <!-- Badge 3: Influencer (Follower) -->
                     {% if follower_count and follower_count >= 5 %}
-                        <span class="badge" style="background-color: #007bff; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Molto seguito dalla community!">📣 Influencer</span>
+                        <span class="badge" style="background-color: #007bff; color: white; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">📣 Influencer</span>
                     {% endif %}
 
-                    <!-- Badge default di base -->
                     <span class="badge badge-spettatore" style="padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;">🍿 Membro Attivo</span>
                 </div>
             </div>
@@ -202,7 +234,6 @@
     </div>
 </div>
 
-<!-- 👤 SCRIPT PER GESTIRE IL "SEGUI" IN TEMPO REALE -->
 <script>
 function toggleFollow(idDest) {
     fetch(`/follow/${idDest}`, {
@@ -218,20 +249,8 @@ function toggleFollow(idDest) {
         return response.json();
     })
     .then(data => {
-        if (data.status === 'followed') {
-            const btn = document.getElementById('btn-follow');
-            if (btn) {
-                btn.innerText = "❌ Non seguire più";
-                btn.className = "btn btn-secondary";
-            }
-            location.reload(); // Ricarica per aggiornare i contatori reali
-        } else if (data.status === 'unfollowed') {
-            const btn = document.getElementById('btn-follow');
-            if (btn) {
-                btn.innerText = "👤+ Segui";
-                btn.className = "btn";
-            }
-            location.reload(); // Ricarica per aggiornare i contatori reali
+        if (data.status === 'followed' || data.status === 'unfollowed') {
+            location.reload();
         } else if (data.error) {
             alert(data.error);
         }
