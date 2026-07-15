@@ -360,7 +360,7 @@
         <!-- COLONNA LATERALE -->
         <div class="sidebar-column">
             
-            <!-- ⚔️ SCONTRO DEL GIORNO (NUOVA FUNZIONALITÀ INTERATTIVA) -->
+            <!-- ⚔️ SCONTRO DEL GIORNO -->
             <div class="stats-box" style="border: 1px solid #ff9f43; margin-bottom: 20px;">
                 <h3 style="margin-top: 0; color: #ff9f43; border-bottom: 2px solid #ff9f43; padding-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                     ⚔️ Scontro del Giorno
@@ -448,13 +448,25 @@
 <script>
 // ⚔️ GESTIONE VOTAZIONE SCONTRO DEL GIORNO
 window.votaScontro = function(scelta) {
+    let fd = new FormData();
+    fd.append('scelta', scelta);
+
     fetch('/vota_scontro', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scelta: scelta })
+        body: fd
     })
-    .then(res => res.json())
+    .then(res => {
+        // Se la rotta fa un redirect (HTML) o restituisce un errore, ricarichiamo semplicemente per aggiornare la pagina
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            return res.json();
+        } else {
+            location.reload();
+            return null;
+        }
+    })
     .then(data => {
+        if (!data) return;
         if (data.error) {
             alert(data.error);
         } else if (data.pct_a !== undefined) {
@@ -468,7 +480,8 @@ window.votaScontro = function(scelta) {
     })
     .catch(err => {
         console.error("Errore fetch:", err);
-        alert("Eseguito voto mock per test (assicurati che la route backend sia attiva!)");
+        // Fallback di emergenza: ricarica la pagina così da mostrare la situazione aggiornata
+        location.reload();
     });
 };
 
