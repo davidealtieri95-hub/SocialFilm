@@ -98,27 +98,30 @@ CREATE TABLE IF NOT EXISTS hype_voti (
 Per far girare il progetto sul tuo computer, segui questi passaggi:
 
 1. **Clona il repository:**
+
    ```bash
    git clone [https://github.com/IL_TUO_NOME_UTENTE/SocialFilm.git](https://github.com/IL_TUO_NOME_UTENTE/SocialFilm.git)
    cd SocialFilm
-   CREA AMBIENTE VIRTUALE
-python -m venv venv
-# Attiva (Windows):
-.\venv\Scripts\activate
-# Attiva (Mac/Linux):
-source venv/bin/activate
 
-Installa le dipendenze:
+2. **CREA AMBIENTE VIRTUALE:**
+    python -m venv venv
 
-pip install -r requirements.txt
+    # Attiva (Windows):
+    .\venv\Scripts\activate
+    # Attiva (Mac/Linux):
+    source venv/bin/activate
 
-Configura il file .env
+3. **Installa le dipendenze:**
 
-TMDB_API_KEY=LaTuaChiaveAPI
-FLASK_SECRET_KEY=LaTuaChiaveSegreta
-FLASK_DEBUG=True
+    pip install -r requirements.txt
+    
+    Configura il file .env
+    
+    TMDB_API_KEY=LaTuaChiaveAPI
+    FLASK_SECRET_KEY=LaTuaChiaveSegreta
+    FLASK_DEBUG=True
 
-Avvio
+4. **Avvio:**
 
-python app.py
+    python app.py
 
