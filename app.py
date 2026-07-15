@@ -894,64 +894,47 @@ def cerca_film_api():
 
 if __name__ == '__main__':
     # 💥 SINCRONIZZAZIONE STRUTTURA DEL DATABASE
+    conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Tabella Hype
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS hype_voti (
-            id_voto INT AUTO_INCREMENT PRIMARY KEY,
-            id_film_tmdb INT NOT NULL,
-            titolo_film VARCHAR(200) NOT NULL,
-            livello VARCHAR(20) NOT NULL
-        );
-        """)
+        # Eseguiamo le operazioni una alla volta per isolare l'errore
+        print("Sincronizzazione tabelle...")
         
-        # Tabella Scontro del Giorno
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scontro_voti (
-            id_voto INT AUTO_INCREMENT PRIMARY KEY,
-            id_utente INT NOT NULL,
-            data_voto DATE NOT NULL,
-            scelta VARCHAR(10) NOT NULL,
-            UNIQUE KEY un_voto_al_giorno (id_utente, data_voto)
-        );
-        """)
+        cursor.execute("CREATE TABLE IF NOT EXISTS hype_voti (id_voto INT AUTO_INCREMENT PRIMARY KEY, id_film_tmdb INT NOT NULL, titolo_film VARCHAR(200) NOT NULL, livello VARCHAR(20) NOT NULL);")
+        cursor.execute("CREATE TABLE IF NOT EXISTS scontro_voti (id_voto INT AUTO_INCREMENT PRIMARY KEY, id_utente INT NOT NULL, data_voto DATE NOT NULL, scelta VARCHAR(10) NOT NULL, UNIQUE KEY un_voto_al_giorno (id_utente, data_voto));")
+        cursor.execute("CREATE TABLE IF NOT EXISTS notifiche (id_notifica INT AUTO_INCREMENT PRIMARY KEY, id_utente INT NOT NULL, testo VARCHAR(500) NOT NULL, letta TINYINT(1) DEFAULT 0, data_ora DATETIME DEFAULT CURRENT_TIMESTAMP);")
         
-        # Tabella Notifiche (Feature 4)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS notifiche (
-            id_notifica INT AUTO_INCREMENT PRIMARY KEY,
-            id_utente INT NOT NULL,
-            testo VARCHAR(500) NOT NULL,
-            letta TINYINT(1) DEFAULT 0,
-            data_ora DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
+        conn.commit()
+        print("✅ Tabelle create/verificate.")
+
+        # Modifiche tabelle con controllo di esistenza colonne
+        colonne_da_aggiungere = [
+            ("post", "voto_regia", "INT DEFAULT 7"),
+            ("post", "voto_trama", "INT DEFAULT 7"),
+            ("post", "voto_cast", "INT DEFAULT 7"),
+            ("film", "genere", "VARCHAR(100)")
+        ]
         
-        # Colonne Valutazione Parametrica nel post (Feature 5)
-        try:
-            cursor.execute("ALTER TABLE post ADD COLUMN voto_regia INT DEFAULT 7;")
-        except Exception: pass
-        try:
-            cursor.execute("ALTER TABLE post ADD COLUMN voto_trama INT DEFAULT 7;")
-        except Exception: pass
-        try:
-            cursor.execute("ALTER TABLE post ADD COLUMN voto_cast INT DEFAULT 7;")
-        except Exception: pass
-        
-        # Colonna Genere della Tabella Film
-        try:
-            cursor.execute("ALTER TABLE film ADD COLUMN genere VARCHAR(100);")
-        except Exception: pass
-            
+        for tabella, colonna, tipo in colonne_da_aggiungere:
+            try:
+                # Controllo se la colonna esiste già
+                cursor.execute(f"SHOW COLUMNS FROM {tabella} LIKE '{colonna}'")
+                if not cursor.fetchone():
+                    cursor.execute(f"ALTER TABLE {tabella} ADD COLUMN {colonna} {tipo};")
+                    print(f"Colonna {colonna} aggiunta a {tabella}.")
+            except Exception as e:
+                print(f"Errore su colonna {colonna}: {e}")
+
         conn.commit()
         cursor.close()
-        conn.close()
         print("✅ Database sincronizzato correttamente!")
+        
     except Exception as e:
-        print(f"⚠️ Impossibile sincronizzare il database: {e}")
+        print(f"⚠️ ERRORE CRITICO DURANTE LA SINCRONIZZAZIONE: {e}")
+    finally:
+        if conn: conn.close()
 
     is_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(debug=is_debug)
