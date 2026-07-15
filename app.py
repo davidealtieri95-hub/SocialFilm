@@ -651,122 +651,59 @@ def profilo_utente(id_utente):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
+    # 1. Recupero dati base utente
     cursor.execute("SELECT id_utente, nickname, email, data_di_nascita, avatar FROM utenti WHERE id_utente = %s", (id_utente,))
     dati_utente = cursor.fetchone()
     if not dati_utente:
-        cursor.close()
-        conn.close()
+        cursor.close(); conn.close()
         return "Utente non trovato", 404
         
+    # 2. Statistiche e Badge
     cursor.execute("SELECT COUNT(*) as tot, AVG(voto_utente) as media FROM post WHERE id_utente = %s", (id_utente,))
     res_stats = cursor.fetchone()
     tot_post = res_stats['tot'] or 0
     voto_medio = round(res_stats['media'], 1) if res_stats['media'] else 0.0
     
-    if tot_post >= 15:
-        badge = "Regista Premio Oscar 🏆"
-    elif tot_post >= 5:
-        badge = "Cinefilo Avanzato 🎬"
-    else:
-        badge = "Spettatore Serale 🍿"
+    badge = "Regista Premio Oscar :trophy:" if tot_post >= 15 else ("Cinefilo Avanzato :clapper:" if tot_post >= 5 else "Spettatore Serale :popcorn:")
         
-    # 🏅 GENERI PREFERITI & BADGE DI GENERE DINAMICI
-    generi_pref = []
-    badges_generi = []
+    # 3. Gestione Vetrina e Radar (con gestione errori)
+    vetrina = []
+    radar_data = []
     try:
-        cursor.execute("""
-            SELECT film.genere, COUNT(*) as tot 
-            FROM post 
-            JOIN film ON post.id_film = film.id_film 
-            WHERE post.id_utente = %s AND film.genere IS NOT NULL AND film.genere != ''
-            GROUP BY film.genere
-            ORDER BY tot DESC
-        """, (id_utente,))
-        generi_count = cursor.fetchall()
+        cursor.execute("SELECT film.titolo, film.immagine FROM vetrina JOIN film ON vetrina.id_movie = film.id_film WHERE vetrina.id_utente = %s ORDER BY posizione ASC", (id_utente,))
+        vetrina = cursor.fetchall()
         
-        generi_pref = [f"{g['genere']} ({g['tot']} post)" for g in generi_count[:3]]
-        
-        diz_generi = {g['genere']: g['tot'] for g in generi_count}
-        if diz_generi.get('Horror', 0) >= 3: badges_generi.append("Scream Queen 🔪")
-        if diz_generi.get('Fantascienza', 0) >= 3: badges_generi.append("Esploratore dello Spazio 🚀")
-        if diz_generi.get('Azione', 0) >= 3: badges_generi.append("Stuntman Professionista 💥")
-        if diz_generi.get('Commedia', 0) >= 3: badges_generi.append("Re della Risata 🤡")
-        if diz_generi.get('Dramma', 0) >= 3: badges_generi.append("Anima Sensibile 🎭")
-        if diz_generi.get('Thriller', 0) >= 3: badges_generi.append("Agente Segreto 🕵️‍♂️")
-        if diz_generi.get('Romantico', 0) >= 3: badges_generi.append("Cuore Incurabile 💖")
+        cursor.execute("SELECT film.genere, AVG(post.voto_utente) as media FROM post JOIN film ON post.id_film = film.id_film WHERE post.id_utente = %s AND film.genere IS NOT NULL GROUP BY film.genere LIMIT 5", (id_utente,))
+        radar_data = cursor.fetchall()
     except Exception as e:
-        print(f"Errore calcolo badge generi: {e}")
-        
-    # --- NUOVA FEATURE: VETRINA ---
-    cursor.execute("""
-        SELECT film.titolo, film.immagine 
-        FROM vetrina 
-        JOIN film ON vetrina.id_film = film.id_film 
-        WHERE vetrina.id_utente = %s ORDER BY posizione ASC
-    """, (id_utente,))
-    vetrina = cursor.fetchall()
+        print(f"Nota: Vetrina o Radar non configurati nel DB: {e}")
 
-    # --- NUOVA FEATURE: RADAR DEL GUSTO ---
-    cursor.execute("""
-        SELECT film.genere, AVG(post.voto_utente) as media
-        FROM post 
-        JOIN film ON post.id_film = film.id_film 
-        WHERE post.id_utente = %s AND film.genere IS NOT NULL
-        GROUP BY film.genere LIMIT 5
-    """, (id_utente,))
-    radar_data = cursor.fetchall()
-        
+    # 4. Follower e Stato
     cursor.execute("SELECT COUNT(*) as tot FROM segui WHERE id_seguito = %s", (id_utente,))
     follower_count = cursor.fetchone()['tot']
-    
     cursor.execute("SELECT COUNT(*) as tot FROM segui WHERE id_seguitore = %s", (id_utente,))
     following_count = cursor.fetchone()['tot']
     
     sta_seguendo = False
     if 'id_utente' in session:
-        cursor.execute("SELECT * FROM segui WHERE id_seguitore = %s AND id_seguito = %s", (session['id_utente'], id_utente))
-        if cursor.fetchone():
-            sta_seguendo = True
+        cursor.execute("SELECT 1 FROM segui WHERE id_seguitore = %s AND id_seguito = %s", (session['id_utente'], id_utente))
+        if cursor.fetchone(): sta_seguendo = True
 
-    query_miei_post = """
-    SELECT post.id_post, film.titolo, film.immagine AS locandina, post.didascalia, post.voto_utente, post.contatore_like
-    FROM post
-    JOIN film ON post.id_film = film.id_film
-    WHERE post.id_utente = %s
-    ORDER BY post.data_creazione DESC;
-    """
-    cursor.execute(query_miei_post, (id_utente,))
+    # 5. Post e Watchlist
+    cursor.execute("SELECT post.id_post, film.titolo, film.immagine AS locandina, post.didascalia, post.voto_utente FROM post JOIN film ON post.id_film = film.id_film WHERE post.id_utente = %s ORDER BY post.data_creazione DESC", (id_utente,))
     miei_post = cursor.fetchall()
     
-    query_watchlist = """
-    SELECT film.id_film, film.titolo, film.immagine AS locandina 
-    FROM watchlist
-    JOIN film ON watchlist.id_film = film.id_film
-    WHERE watchlist.id_utente = %s;
-    """
-    cursor.execute(query_watchlist, (id_utente,))
+    cursor.execute("SELECT film.id_film, film.titolo, film.immagine AS locandina FROM watchlist JOIN film ON watchlist.id_film = film.id_film WHERE watchlist.id_utente = %s", (id_utente,))
     mia_watchlist = cursor.fetchall()
     
-    cursor.close()
-    conn.close()
+    cursor.close(); conn.close()
     
     return render_template(
-        'profilo.html',
-        utente=dati_utente,
-        posts=miei_post,
-        watchlist=mia_watchlist,
-        tot_post=tot_post,
-        voto_medio=voto_medio,
-        badge=badge,
-        follower_count=follower_count,
-        following_count=following_count,
-        sta_seguendo=sta_seguendo,
-        utente_loggato=session.get('nickname'),
-        id_utente_loggato=session.get('id_utente'),
-        generi_pref=generi_pref,
-        badges_generi=badges_generi,
-        vetrina=vetrina,
-        radar_data=radar_data
+        'profilo.html', utente=dati_utente, posts=miei_post, watchlist=mia_watchlist,
+        tot_post=tot_post, voto_medio=voto_medio, badge=badge,
+        follower_count=follower_count, following_count=following_count,
+        sta_seguendo=sta_seguendo, utente_loggato=session.get('nickname'),
+        id_utente_loggato=session.get('id_utente'), vetrina=vetrina, radar_data=radar_data
     )
 
 # 🔄 5. SISTEMA AVATAR EMOJI CINEMATOGRAFICI
